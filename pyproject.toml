@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wallpaper-crop-tool"
+version = "1.0.0"
+description = "Interactive batch crop and resize tool for wallpapers across multiple screen ratios"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+dependencies = [
+    "PyQt6>=6.5",
+    "Pillow>=10.0",
+    "psd-tools>=1.9",
+]
+
+[project.scripts]
+wallpaper-crop-tool = "wallpaper_crop_tool:main"
+
+[tool.setuptools]
+py-modules = ["wallpaper_crop_tool"]
