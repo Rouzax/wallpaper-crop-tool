@@ -22,25 +22,26 @@ The folder structure is preserved in the output, so your organized collection st
 
 ## Screenshots
 
-### Interactive Crop Editor
-Adjust crop position and size for each aspect ratio. The 👁 and ⬜ icons track which images you've reviewed.
+### Interactive Crop Editor with Logo Overlay
+Adjust crop position and size for each aspect ratio. The logo overlay preview (TopRight, 25%) shows exactly what the export will look like.
 
 ![Crop Editor](docs/screenshot-crop-editor.png)
 
 ### Batch Export Progress
-Parallel export with progress tracking — processes multiple images simultaneously across CPU cores.
+Parallel export with progress tracking — processes multiple images simultaneously across CPU cores. The ✅ icons confirm which images have been exported.
 
 ![Batch Export](docs/screenshot-batch-export.png)
 
-### Export Complete
-All images exported with status tracking. The ✅ icons confirm which images have been processed.
+### Logo Overlay — Center Position
+The logo overlay supports multiple positions and sizes. Here the logo is centered at 50% of the shorter side.
 
-![Export Complete](docs/screenshot-exported.png)
+![Logo Overlay](docs/screenshot-exported.png)
 
 ## Features
 
 - **Interactive crop editor** — drag to reposition, drag corners to resize (aspect ratio locked)
 - **Multiple aspect ratios** — switch between ratios per image, each remembers its own crop position
+- **Logo overlay** — optionally composite an SVG or PNG logo onto exports with configurable position, size, and margin, with live preview
 - **Rule-of-thirds overlay** — helps with composition
 - **PSD support** — reads Photoshop files directly via `psd-tools`, flattens layers automatically
 - **Subfolder scanning** — recursively scans input folders and recreates the structure in output
@@ -75,10 +76,12 @@ All images exported with status tracking. The ✅ icons confirm which images hav
 pip install -r requirements.txt
 ```
 
+For SVG logo support, ensure [ImageMagick](https://imagemagick.org/) is installed and `magick` is on your PATH.
+
 ### Run
 
 ```bash
-python wallpaper_crop_tool.py
+python -m wallpaper_crop_tool
 ```
 
 ## Usage
@@ -99,6 +102,22 @@ If you just want auto-centered crops for everything:
 1. Open input folder
 2. Set output folder
 3. Click **▶▶ Export All** — all images export with centered maximum crops
+
+### Logo Overlay (Optional)
+
+Add a logo or watermark to all exported wallpapers:
+
+1. In the **Logo Overlay** panel (right side), click **Select…** to choose an SVG or PNG logo
+2. Adjust **Position** (TopRight, BottomLeft, Center, etc.)
+3. Set **Size** as a percentage of the image width/height/shorter side
+4. Set **Margin** in pixels from the edge
+5. The logo appears live on the preview — what you see is what you get
+6. Toggle the **Enable Logo** checkbox to compare with/without
+
+The logo is applied during export to the final resolution image, so it stays sharp regardless of preview zoom.
+
+> **SVG logos** require [ImageMagick](https://imagemagick.org/) (`magick` on PATH) — uses exact-density vector rasterization for sharp edges.
+> **PNG logos** work out of the box with no extra dependencies.
 
 ### Progress Tracking
 
@@ -132,7 +151,7 @@ Output/
 
 ### Adding or Changing Ratios
 
-Edit the `RATIOS` list near the top of `wallpaper_crop_tool.py`:
+Edit the `RATIOS` list in `wallpaper_crop_tool/config.py`:
 
 ```python
 RATIOS = [
