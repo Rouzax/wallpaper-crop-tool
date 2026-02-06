@@ -25,8 +25,15 @@ def process_worker(args: dict) -> dict:
     ratios = args["ratios"]
     output_root = Path(args["output_root"])
     rel_parent = args["rel_parent"]  # str or None
-    compress = args["compress_level"]
+    export = args.get("export", {})
     logo_settings = args.get("logo")  # None or dict with logo config
+
+    # Export settings with backwards-compatible defaults
+    fmt = export.get("format", "PNG")
+    compress = export.get("compress_level", 9)
+    jpeg_quality = export.get("jpeg_quality", 95)
+    jpeg_subsampling = export.get("jpeg_subsampling", 0)
+    jpeg_optimize = export.get("jpeg_optimize", True)
 
     try:
         img = open_image(img_path).convert("RGB")
@@ -60,8 +67,18 @@ def process_worker(args: dict) -> dict:
             if rel_parent:
                 out_dir = out_dir / rel_parent
             out_dir.mkdir(parents=True, exist_ok=True)
-            out_path = unique_path(out_dir / f"{img_path.stem}.png")
-            resized.save(str(out_path), "PNG", compress_level=compress)
+
+            if fmt == "JPEG":
+                out_path = unique_path(out_dir / f"{img_path.stem}.jpg")
+                resized.save(
+                    str(out_path), "JPEG",
+                    quality=jpeg_quality,
+                    optimize=jpeg_optimize,
+                    subsampling=jpeg_subsampling,
+                )
+            else:
+                out_path = unique_path(out_dir / f"{img_path.stem}.png")
+                resized.save(str(out_path), "PNG", compress_level=compress)
 
         return {"index": idx, "success": True, "name": img_path.name}
     except Exception as e:

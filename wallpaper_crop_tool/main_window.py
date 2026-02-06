@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QListWidget, QListWidgetItem, QPushButton, QLabel, QFileDialog,
     QSplitter, QGroupBox, QMessageBox, QProgressDialog, QStatusBar,
-    QToolBar, QCheckBox, QComboBox, QSpinBox, QApplication,
+    QToolBar, QCheckBox, QComboBox, QSpinBox, QSlider, QApplication,
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap, QImage, QAction, QKeySequence, QShortcut
@@ -24,6 +24,9 @@ from PyQt6.QtGui import QPixmap, QImage, QAction, QKeySequence, QShortcut
 from wallpaper_crop_tool.config import (
     RATIOS, PNG_COMPRESS_LEVEL, IMAGE_EXTENSIONS,
     LOGO_POSITIONS, LOGO_BASE_DIMENSIONS,
+    OUTPUT_FORMATS, OUTPUT_FORMAT_DEFAULT,
+    JPEG_QUALITY_DEFAULT, JPEG_QUALITY_MIN, JPEG_QUALITY_MAX,
+    JPEG_SUBSAMPLING_OPTIONS, JPEG_SUBSAMPLING_DEFAULT, JPEG_SUBSAMPLING_MAP,
 )
 from wallpaper_crop_tool.models import ImageState, auto_center_max
 from wallpaper_crop_tool.image_io import open_image, get_image_size, unique_path
@@ -164,6 +167,7 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(self._crop_info_label)
 
         right_layout.addWidget(self._build_actions_group())
+        right_layout.addWidget(self._build_export_group())
         right_layout.addWidget(self._build_logo_group())
         right_layout.addWidget(self._build_shortcuts_group())
 
@@ -211,6 +215,77 @@ class MainWindow(QMainWindow):
         self._btn_next = btn_next
 
         return actions_group
+
+    def _build_export_group(self) -> QGroupBox:
+        export_group = QGroupBox("Export Settings")
+        export_layout = QVBoxLayout(export_group)
+
+        # Format dropdown
+        fmt_row = QHBoxLayout()
+        fmt_row.addWidget(QLabel("Format:"))
+        self._export_format = QComboBox()
+        self._export_format.addItems(OUTPUT_FORMATS)
+        self._export_format.setCurrentText(OUTPUT_FORMAT_DEFAULT)
+        self._export_format.currentTextChanged.connect(self._on_export_format_changed)
+        fmt_row.addWidget(self._export_format)
+        export_layout.addLayout(fmt_row)
+
+        # JPEG quality slider
+        quality_row = QHBoxLayout()
+        quality_row.addWidget(QLabel("Quality:"))
+        self._jpeg_quality_slider = QSlider(Qt.Orientation.Horizontal)
+        self._jpeg_quality_slider.setRange(JPEG_QUALITY_MIN, JPEG_QUALITY_MAX)
+        self._jpeg_quality_slider.setValue(JPEG_QUALITY_DEFAULT)
+        self._jpeg_quality_slider.setTickPosition(QSlider.TickPosition.NoTicks)
+        quality_row.addWidget(self._jpeg_quality_slider, stretch=1)
+        self._jpeg_quality_label = QLabel(str(JPEG_QUALITY_DEFAULT))
+        self._jpeg_quality_label.setFixedWidth(24)
+        quality_row.addWidget(self._jpeg_quality_label)
+        self._jpeg_quality_slider.valueChanged.connect(
+            lambda v: self._jpeg_quality_label.setText(str(v))
+        )
+        export_layout.addLayout(quality_row)
+        self._jpeg_quality_row_widgets = [
+            quality_row.itemAt(i).widget()
+            for i in range(quality_row.count()) if quality_row.itemAt(i).widget()
+        ]
+
+        # JPEG subsampling dropdown
+        sub_row = QHBoxLayout()
+        sub_row.addWidget(QLabel("Subsampling:"))
+        self._jpeg_subsampling = QComboBox()
+        self._jpeg_subsampling.addItems(JPEG_SUBSAMPLING_OPTIONS)
+        self._jpeg_subsampling.setCurrentText(JPEG_SUBSAMPLING_DEFAULT)
+        sub_row.addWidget(self._jpeg_subsampling)
+        export_layout.addLayout(sub_row)
+        self._jpeg_sub_row_widgets = [
+            sub_row.itemAt(i).widget()
+            for i in range(sub_row.count()) if sub_row.itemAt(i).widget()
+        ]
+
+        # Initial visibility — hide JPEG controls when PNG is selected
+        self._on_export_format_changed(self._export_format.currentText())
+
+        return export_group
+
+    def _on_export_format_changed(self, fmt: str):
+        """Show/hide JPEG-specific controls based on selected format."""
+        is_jpeg = fmt == "JPEG"
+        for w in self._jpeg_quality_row_widgets:
+            w.setVisible(is_jpeg)
+        for w in self._jpeg_sub_row_widgets:
+            w.setVisible(is_jpeg)
+
+    def _get_export_settings(self) -> dict:
+        """Build export settings dict from current UI state."""
+        fmt = self._export_format.currentText()  # "PNG" or "JPEG"
+        return {
+            "format": fmt,
+            "compress_level": PNG_COMPRESS_LEVEL,
+            "jpeg_quality": self._jpeg_quality_slider.value(),
+            "jpeg_subsampling": JPEG_SUBSAMPLING_MAP[self._jpeg_subsampling.currentText()],
+            "jpeg_optimize": True,
+        }
 
     def _build_logo_group(self) -> QGroupBox:
         logo_group = QGroupBox("Logo Overlay")
@@ -551,8 +626,11 @@ class MainWindow(QMainWindow):
         self._crop_widget.clear()
 
         # Cancel any previous loader
-        if self._loader is not None and self._loader.isRunning():
+        if self._loader is not None:
             self._loader.disconnect()
+            if self._loader.isRunning():
+                self._loader.quit()
+                self._loader.wait(500)
 
         self._loader = ImageLoaderThread(state.path, self)
         self._loader.finished.connect(lambda pixmap, r=row: self._on_image_loaded(r, pixmap))
@@ -726,8 +804,19 @@ class MainWindow(QMainWindow):
             if state.rel_path and state.rel_path.parent != Path("."):
                 out_dir = out_dir / state.rel_path.parent
             out_dir.mkdir(parents=True, exist_ok=True)
-            out_path = unique_path(out_dir / f"{state.path.stem}.png")
-            resized.save(str(out_path), "PNG", compress_level=PNG_COMPRESS_LEVEL)
+
+            export = self._get_export_settings()
+            if export["format"] == "JPEG":
+                out_path = unique_path(out_dir / f"{state.path.stem}.jpg")
+                resized.save(
+                    str(out_path), "JPEG",
+                    quality=export["jpeg_quality"],
+                    optimize=export["jpeg_optimize"],
+                    subsampling=export["jpeg_subsampling"],
+                )
+            else:
+                out_path = unique_path(out_dir / f"{state.path.stem}.png")
+                resized.save(str(out_path), "PNG", compress_level=export["compress_level"])
 
         state.processed = True
 
@@ -779,7 +868,7 @@ class MainWindow(QMainWindow):
             "ratios": RATIOS,
             "output_root": str(self._output_root),
             "rel_parent": rel_parent,
-            "compress_level": PNG_COMPRESS_LEVEL,
+            "export": self._get_export_settings(),
             "logo": self._get_logo_worker_settings(),
         }
 

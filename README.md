@@ -46,6 +46,7 @@ The logo overlay supports multiple positions and sizes. Here the logo is centere
 - **PSD support** — reads Photoshop files directly via `psd-tools`, flattens layers automatically
 - **Subfolder scanning** — recursively scans input folders and recreates the structure in output
 - **Parallel export** — batch processing uses multiple CPU cores
+- **Export format choice** — PNG (lossless, max compression) or JPEG (tunable quality, 4:4:4 subsampling, Huffman optimization)
 - **Progress tracking** — reviewed/exported counters, progress dialogs for all operations
 - **Keyboard-driven workflow** — navigate images and ratios without touching the mouse
 - **Large image support** — handles images exceeding Pillow's default 178MP limit
@@ -176,19 +177,21 @@ RATIOS = [
 
 ### Other Settings
 
-| Setting              | Default | Description                                |
-| -------------------- | ------- | ------------------------------------------ |
-| `PNG_COMPRESS_LEVEL` | `9`     | PNG compression (0-9, 9 = max compression) |
-| `IMAGE_EXTENSIONS`   | —       | Set of supported file extensions            |
-| `NUDGE_SMALL`        | `1`     | Arrow key nudge in pixels                  |
-| `NUDGE_LARGE`        | `10`    | Shift+Arrow nudge in pixels                |
-| `MIN_CROP_SIZE`      | `50`    | Minimum crop dimension in pixels           |
+| Setting              | Default | Description                                        |
+| -------------------- | ------- | -------------------------------------------------- |
+| `PNG_COMPRESS_LEVEL` | `9`     | PNG compression (0-9, 9 = max compression)         |
+| `JPEG_QUALITY_DEFAULT` | `95`  | JPEG quality (1-100)                               |
+| `JPEG_SUBSAMPLING_DEFAULT` | `4:4:4` | Chroma subsampling (4:4:4 / 4:2:2 / 4:2:0)  |
+| `IMAGE_EXTENSIONS`   | —       | Set of supported file extensions                   |
+| `NUDGE_SMALL`        | `1`     | Arrow key nudge in pixels                          |
+| `NUDGE_LARGE`        | `10`    | Shift+Arrow nudge in pixels                        |
+| `MIN_CROP_SIZE`      | `50`    | Minimum crop dimension in pixels                   |
 
 ## Supported Formats
 
 **Input:** PNG, JPEG, BMP, TIFF, WebP, PSD (Photoshop)
 
-**Output:** PNG (maximum compression)
+**Output:** PNG (maximum compression) or JPEG (configurable quality, subsampling, Huffman optimization)
 
 ## License
 

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.2.0 — 2026-02-06
+
+### Added
+
+- **JPEG export**: choose between PNG and JPEG output in the new Export Settings panel
+  - Quality slider (1–100, default 95)
+  - Chroma subsampling selector: 4:4:4 (no subsampling), 4:2:2, or 4:2:0
+  - Huffman optimization enabled by default
+- Export Settings group on right panel (between Actions and Logo Overlay)
+- JPEG-specific controls auto-hide when PNG is selected
+
 ## 1.1.0 — 2026-02-06
 
 ### Added
