@@ -2,8 +2,10 @@
 Data models and crop-geometry utilities.
 
 CropRect and ImageState are the core data structures shared across the UI
-and the export worker.  The four helper functions handle aspect-ratio math
-and boundary clamping.
+and the export worker.  ``ImageState.crops`` is keyed by ``aspect_key()``
+output (e.g. ``"16:9"``), so one crop is shared across all export targets
+for a given aspect ratio.  The four helper functions handle aspect-ratio
+math and boundary clamping.
 """
 
 from dataclasses import dataclass, field
@@ -31,7 +33,7 @@ class ImageState:
     rel_path: Path = None  # relative path from input root (including filename)
     img_w: int = 0
     img_h: int = 0
-    crops: dict = field(default_factory=dict)  # ratio_name -> CropRect
+    crops: dict = field(default_factory=dict)  # aspect_key (e.g. "16:9") -> CropRect
     reviewed: bool = False   # user has visited this image
     processed: bool = False  # image has been exported
 

@@ -22,13 +22,15 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap, QImage, QAction, QKeySequence, QShortcut
 
 from wallpaper_crop_tool.config import (
-    RATIOS, PNG_COMPRESS_LEVEL, IMAGE_EXTENSIONS,
+    PNG_COMPRESS_LEVEL, IMAGE_EXTENSIONS,
     LOGO_POSITIONS, LOGO_BASE_DIMENSIONS,
     OUTPUT_FORMATS, OUTPUT_FORMAT_DEFAULT,
     JPEG_QUALITY_DEFAULT, JPEG_QUALITY_MIN, JPEG_QUALITY_MAX,
     JPEG_SUBSAMPLING_OPTIONS, JPEG_SUBSAMPLING_DEFAULT, JPEG_SUBSAMPLING_MAP,
 )
-from wallpaper_crop_tool.models import ImageState, auto_center_max
+from wallpaper_crop_tool.ratios import load_ratios, save_ratios, aspect_key
+from wallpaper_crop_tool.ratio_editor import RatioEditorDialog
+from wallpaper_crop_tool.models import ImageState, CropRect, auto_center_max
 from wallpaper_crop_tool.image_io import open_image, get_image_size, unique_path
 from wallpaper_crop_tool.logo import HAS_MAGICK, composite_logo
 from wallpaper_crop_tool.worker import process_worker
@@ -44,6 +46,7 @@ class MainWindow(QMainWindow):
         self._image_states: list[ImageState] = []
         self._current_index = -1
         self._current_ratio_idx = 0
+        self._ratios = load_ratios()
         self._output_root: Path | None = None
         self._input_folder: Path | None = None
         self._loader: ImageLoaderThread | None = None
@@ -176,17 +179,87 @@ class MainWindow(QMainWindow):
 
     def _build_ratio_group(self) -> QGroupBox:
         ratio_group = QGroupBox("Aspect Ratios")
-        ratio_layout = QVBoxLayout(ratio_group)
+        self._ratio_layout = QVBoxLayout(ratio_group)
         self._ratio_buttons: list[QPushButton] = []
-        for i, r in enumerate(RATIOS):
-            btn = QPushButton(f"{r['name']}  ({r['target_w']}×{r['target_h']})")
+        self._rebuild_ratio_buttons()
+
+        # Editor button — always at the bottom of the group
+        btn_edit = QPushButton("⚙️ Edit Ratios…")
+        btn_edit.clicked.connect(self._open_ratio_editor)
+        self._ratio_layout.addWidget(btn_edit)
+
+        return ratio_group
+
+    def _rebuild_ratio_buttons(self):
+        """Clear and recreate ratio buttons from self._ratios."""
+        # Remove existing ratio buttons
+        for btn in self._ratio_buttons:
+            self._ratio_layout.removeWidget(btn)
+            btn.deleteLater()
+        self._ratio_buttons.clear()
+
+        # Insert new buttons (before the ⚙️ button at the end)
+        for i, r in enumerate(self._ratios):
+            n_targets = len(r.get("targets", []))
+            label = r["name"] if n_targets <= 1 else f"{r['name']} (×{n_targets})"
+            btn = QPushButton(label)
             btn.setCheckable(True)
             btn.clicked.connect(lambda checked, idx=i: self._on_ratio_selected(idx))
-            ratio_layout.addWidget(btn)
+            self._ratio_layout.insertWidget(i, btn)
             self._ratio_buttons.append(btn)
+
+        # Select first ratio
+        self._current_ratio_idx = 0
         if self._ratio_buttons:
             self._ratio_buttons[0].setChecked(True)
-        return ratio_group
+
+    def _open_ratio_editor(self):
+        """Open the ratio editor dialog and apply changes on accept."""
+        # Save current crop before anything changes
+        self._save_current_crop()
+
+        dlg = RatioEditorDialog(self._ratios, parent=self)
+        if dlg.exec() != RatioEditorDialog.DialogCode.Accepted:
+            return
+
+        new_ratios = dlg.get_ratios()
+
+        # Persist to JSON
+        try:
+            save_ratios(new_ratios)
+        except (ValueError, OSError) as exc:
+            QMessageBox.warning(self, "Save Failed", f"Could not save ratios:\n{exc}")
+            return
+
+        # Build set of aspect keys for the new ratios
+        new_aspect_keys: dict[str, dict] = {}
+        for r in new_ratios:
+            akey = aspect_key(r["ratio_w"], r["ratio_h"])
+            new_aspect_keys[akey] = r
+
+        # Reconcile crops for all loaded images
+        for state in self._image_states:
+            # Keep crops whose aspect key still exists, discard removed ones
+            state.crops = {
+                akey: crop for akey, crop in state.crops.items()
+                if akey in new_aspect_keys
+            }
+            # Add auto-center-max for new aspect keys
+            for akey, r in new_aspect_keys.items():
+                if akey not in state.crops:
+                    state.crops[akey] = auto_center_max(
+                        state.img_w, state.img_h,
+                        r["ratio_w"], r["ratio_h"],
+                    )
+
+        # Update instance state and rebuild UI
+        self._ratios = new_ratios
+        self._rebuild_ratio_buttons()
+        self._update_button_states()
+
+        # Re-apply first ratio to the displayed image
+        if self._ratios and self._current_index >= 0:
+            self._apply_ratio(0)
 
     def _build_actions_group(self) -> QGroupBox:
         actions_group = QGroupBox("Actions")
@@ -493,9 +566,10 @@ class MainWindow(QMainWindow):
         """Build logo config dict from current UI settings, or None if disabled."""
         if not self._logo_enabled.isChecked() or not self._logo_path or not self._logo_pixmap:
             return None
-        if self._current_index < 0:
+        if self._current_index < 0 or not self._ratios:
             return None
-        r = RATIOS[self._current_ratio_idx]
+        r = self._ratios[self._current_ratio_idx]
+        first_target = r["targets"][0]
         return {
             "position": self._logo_position.currentText(),
             "size_percent": self._logo_size.value(),
@@ -503,8 +577,8 @@ class MainWindow(QMainWindow):
             "margin_auto": self._logo_margin_auto.isChecked(),
             "margin_ratio": self._logo_margin_ratio.value() / 100.0,
             "margin_px": self._logo_margin_px.value(),
-            "target_w": r["target_w"],
-            "target_h": r["target_h"],
+            "target_w": first_target["target_w"],
+            "target_h": first_target["target_h"],
         }
 
     def _get_logo_worker_settings(self) -> dict | None:
@@ -578,9 +652,10 @@ class MainWindow(QMainWindow):
 
             rel = f.relative_to(self._input_folder)
             state = ImageState(path=f, rel_path=rel, img_w=w, img_h=h)
-            # Initialize crops to auto-center-max for all ratios
-            for r in RATIOS:
-                state.crops[r["name"]] = auto_center_max(w, h, r["ratio_w"], r["ratio_h"])
+            # Initialize crops to auto-center-max for all ratio groups (keyed by aspect)
+            for r in self._ratios:
+                akey = aspect_key(r["ratio_w"], r["ratio_h"])
+                state.crops[akey] = auto_center_max(w, h, r["ratio_w"], r["ratio_h"])
             self._image_states.append(state)
 
             # Show relative path in list if scanning subfolders
@@ -627,7 +702,11 @@ class MainWindow(QMainWindow):
 
         # Cancel any previous loader
         if self._loader is not None:
-            self._loader.disconnect()
+            try:
+                self._loader.finished.disconnect()
+                self._loader.error.disconnect()
+            except (TypeError, RuntimeError):
+                pass  # Already disconnected or destroyed
             if self._loader.isRunning():
                 self._loader.quit()
                 self._loader.wait(500)
@@ -664,24 +743,26 @@ class MainWindow(QMainWindow):
         self._apply_ratio(idx)
 
     def _apply_ratio(self, ratio_idx: int):
-        if self._current_index < 0:
+        if self._current_index < 0 or not self._ratios:
             return
         state = self._image_states[self._current_index]
-        r = RATIOS[ratio_idx]
-        crop = state.crops.get(r["name"])
+        r = self._ratios[ratio_idx]
+        akey = aspect_key(r["ratio_w"], r["ratio_h"])
+        crop = state.crops.get(akey)
         if not crop:
             crop = auto_center_max(state.img_w, state.img_h, r["ratio_w"], r["ratio_h"])
-            state.crops[r["name"]] = crop
+            state.crops[akey] = crop
         self._crop_widget.set_crop(crop, r["ratio_w"] / r["ratio_h"])
         self._update_crop_info()
         self._update_logo_preview()
 
     def _save_current_crop(self):
-        if self._current_index < 0:
+        if self._current_index < 0 or not self._ratios:
             return
         state = self._image_states[self._current_index]
-        r = RATIOS[self._current_ratio_idx]
-        state.crops[r["name"]] = self._crop_widget.get_crop()
+        r = self._ratios[self._current_ratio_idx]
+        akey = aspect_key(r["ratio_w"], r["ratio_h"])
+        state.crops[akey] = self._crop_widget.get_crop()
 
     def _on_crop_changed(self):
         self._save_current_crop()
@@ -689,15 +770,17 @@ class MainWindow(QMainWindow):
         self._update_logo_preview()
 
     def _update_crop_info(self):
-        if self._current_index < 0:
+        if self._current_index < 0 or not self._ratios:
             self._crop_info_label.setText("Crop: —")
             return
         crop = self._crop_widget.get_crop()
-        r = RATIOS[self._current_ratio_idx]
+        r = self._ratios[self._current_ratio_idx]
+        targets = r.get("targets", [])
+        exports = ", ".join(f"{t['target_w']}×{t['target_h']}" for t in targets)
         self._crop_info_label.setText(
             f"Crop: {crop.w}×{crop.h}\n"
             f"Position: ({crop.x}, {crop.y})\n"
-            f"Target: {r['target_w']}×{r['target_h']}"
+            f"Exports to: {exports}"
         )
 
     # =========================================================================
@@ -705,12 +788,13 @@ class MainWindow(QMainWindow):
     # =========================================================================
 
     def _auto_center_current(self):
-        if self._current_index < 0:
+        if self._current_index < 0 or not self._ratios:
             return
         state = self._image_states[self._current_index]
-        r = RATIOS[self._current_ratio_idx]
+        r = self._ratios[self._current_ratio_idx]
+        akey = aspect_key(r["ratio_w"], r["ratio_h"])
         crop = auto_center_max(state.img_w, state.img_h, r["ratio_w"], r["ratio_h"])
-        state.crops[r["name"]] = crop
+        state.crops[akey] = crop
         self._crop_widget.set_crop(crop, r["ratio_w"] / r["ratio_h"])
         self._update_crop_info()
 
@@ -718,8 +802,9 @@ class MainWindow(QMainWindow):
         if self._current_index < 0:
             return
         state = self._image_states[self._current_index]
-        for r in RATIOS:
-            state.crops[r["name"]] = auto_center_max(state.img_w, state.img_h, r["ratio_w"], r["ratio_h"])
+        for r in self._ratios:
+            akey = aspect_key(r["ratio_w"], r["ratio_h"])
+            state.crops[akey] = auto_center_max(state.img_w, state.img_h, r["ratio_w"], r["ratio_h"])
         self._apply_ratio(self._current_ratio_idx)
 
     # =========================================================================
@@ -737,23 +822,24 @@ class MainWindow(QMainWindow):
             self._image_list.setCurrentRow(self._current_index + 1)
 
     def _next_ratio(self):
-        if len(RATIOS) == 0:
+        if len(self._ratios) == 0:
             return
-        idx = (self._current_ratio_idx + 1) % len(RATIOS)
+        idx = (self._current_ratio_idx + 1) % len(self._ratios)
         self._on_ratio_selected(idx)
 
     def _prev_ratio(self):
-        if len(RATIOS) == 0:
+        if len(self._ratios) == 0:
             return
-        idx = (self._current_ratio_idx - 1) % len(RATIOS)
+        idx = (self._current_ratio_idx - 1) % len(self._ratios)
         self._on_ratio_selected(idx)
 
     def _update_button_states(self):
         has_images = len(self._image_states) > 0
+        has_ratios = len(self._ratios) > 0
         self._btn_prev.setEnabled(self._current_index > 0)
         self._btn_next.setEnabled(self._current_index < len(self._image_states) - 1)
-        self._act_process_current.setEnabled(has_images and self._current_index >= 0)
-        self._act_process_all_manual.setEnabled(has_images)
+        self._act_process_current.setEnabled(has_images and has_ratios and self._current_index >= 0)
+        self._act_process_all_manual.setEnabled(has_images and has_ratios)
 
     # =========================================================================
     # Processing / export
@@ -768,55 +854,57 @@ class MainWindow(QMainWindow):
         return True
 
     def _process_image(self, state: ImageState):
-        """Process a single image: crop, resize, and save for all ratios."""
+        """Process a single image: crop, resize, and save for all ratio groups and targets."""
         img = open_image(state.path)
         img = img.convert("RGB")  # Flatten (removes alpha, layers)
 
         logo_settings = self._get_logo_worker_settings()
 
-        for r in RATIOS:
-            crop = state.crops.get(r["name"])
+        for group in self._ratios:
+            akey = aspect_key(group["ratio_w"], group["ratio_h"])
+            crop = state.crops.get(akey)
             if not crop:
-                crop = auto_center_max(state.img_w, state.img_h, r["ratio_w"], r["ratio_h"])
+                crop = auto_center_max(state.img_w, state.img_h, group["ratio_w"], group["ratio_h"])
 
-            # Crop
+            # Crop once per aspect ratio group
             cropped = img.crop((crop.x, crop.y, crop.x + crop.w, crop.y + crop.h))
 
-            # Resize to target
-            target_size = (r["target_w"], r["target_h"])
-            resized = cropped.resize(target_size, Image.Resampling.LANCZOS)
+            for target in group["targets"]:
+                # Resize to each target resolution
+                target_size = (target["target_w"], target["target_h"])
+                resized = cropped.resize(target_size, Image.Resampling.LANCZOS)
 
-            # Apply logo overlay if enabled
-            if logo_settings and logo_settings.get("enabled"):
-                logo_path = Path(logo_settings["path"])
-                resized = composite_logo(
-                    resized, logo_path,
-                    position=logo_settings["position"],
-                    size_percent=logo_settings["size_percent"],
-                    base_dimension=logo_settings["base_dimension"],
-                    margin_auto=logo_settings.get("margin_auto", False),
-                    margin_ratio=logo_settings.get("margin_ratio", 0.75),
-                    margin_px=logo_settings.get("margin_px", 40),
-                )
+                # Apply logo overlay if enabled
+                if logo_settings and logo_settings.get("enabled"):
+                    logo_path = Path(logo_settings["path"])
+                    resized = composite_logo(
+                        resized, logo_path,
+                        position=logo_settings["position"],
+                        size_percent=logo_settings["size_percent"],
+                        base_dimension=logo_settings["base_dimension"],
+                        margin_auto=logo_settings.get("margin_auto", False),
+                        margin_ratio=logo_settings.get("margin_ratio", 0.75),
+                        margin_px=logo_settings.get("margin_px", 40),
+                    )
 
-            # Save — recreate subfolder structure from input
-            out_dir = self._output_root / r["folder"]
-            if state.rel_path and state.rel_path.parent != Path("."):
-                out_dir = out_dir / state.rel_path.parent
-            out_dir.mkdir(parents=True, exist_ok=True)
+                # Save — recreate subfolder structure from input
+                out_dir = self._output_root / target["folder"]
+                if state.rel_path and state.rel_path.parent != Path("."):
+                    out_dir = out_dir / state.rel_path.parent
+                out_dir.mkdir(parents=True, exist_ok=True)
 
-            export = self._get_export_settings()
-            if export["format"] == "JPEG":
-                out_path = unique_path(out_dir / f"{state.path.stem}.jpg")
-                resized.save(
-                    str(out_path), "JPEG",
-                    quality=export["jpeg_quality"],
-                    optimize=export["jpeg_optimize"],
-                    subsampling=export["jpeg_subsampling"],
-                )
-            else:
-                out_path = unique_path(out_dir / f"{state.path.stem}.png")
-                resized.save(str(out_path), "PNG", compress_level=export["compress_level"])
+                export = self._get_export_settings()
+                if export["format"] == "JPEG":
+                    out_path = unique_path(out_dir / f"{state.path.stem}.jpg")
+                    resized.save(
+                        str(out_path), "JPEG",
+                        quality=export["jpeg_quality"],
+                        optimize=export["jpeg_optimize"],
+                        subsampling=export["jpeg_subsampling"],
+                    )
+                else:
+                    out_path = unique_path(out_dir / f"{state.path.stem}.png")
+                    resized.save(str(out_path), "PNG", compress_level=export["compress_level"])
 
         state.processed = True
 
@@ -856,8 +944,8 @@ class MainWindow(QMainWindow):
     def _build_worker_args(self, index: int, state: ImageState) -> dict:
         """Build serializable arguments for the parallel worker."""
         crops_serial = {}
-        for name, crop in state.crops.items():
-            crops_serial[name] = (crop.x, crop.y, crop.w, crop.h)
+        for akey, crop in state.crops.items():
+            crops_serial[akey] = (crop.x, crop.y, crop.w, crop.h)
         rel_parent = str(state.rel_path.parent) if state.rel_path and state.rel_path.parent != Path(".") else None
         return {
             "index": index,
@@ -865,7 +953,7 @@ class MainWindow(QMainWindow):
             "img_w": state.img_w,
             "img_h": state.img_h,
             "crops": crops_serial,
-            "ratios": RATIOS,
+            "ratios": self._ratios,
             "output_root": str(self._output_root),
             "rel_parent": rel_parent,
             "export": self._get_export_settings(),

@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.3.0 — 2026-02-09
+
+### Added
+
+- **Ratio grouping**: one crop per aspect ratio, shared across multiple export resolutions
+  - A single crop position applies to all targets with the same aspect ratio — crop once, export at every resolution
+  - Ratio buttons show `16:9 (×2)` when a group has multiple targets
+  - Crop info panel shows `Exports to: 3840×2160, 1920×1080` for multi-target groups
+- **Two-panel ratio editor**: replaces the flat table with a ratio groups (left) + targets (right) layout
+  - Left panel: add, remove, and reorder ratio groups
+  - Right panel: add and remove export targets for the selected group
+  - "Add Ratio" dialog with duplicate aspect-ratio detection — `42:18` is blocked when `21:9` exists with a helpful message
+  - "Add Target" dialog with auto-computed height from the group's aspect ratio
+  - Removing the last target from a group auto-deletes the group
+  - Live validation: red borders on invalid folders, duplicate folder detection across all groups
+  - Reset to Defaults button restores the built-in 3 ratio groups
+- **Normalized aspect detection**: `32:18` and `16:9` are recognized as the same aspect ratio internally via GCD reduction, while displaying the user's original input
+- **External ratio config**: ratios are stored in `ratios.json` in the user config directory
+  - Windows: `%APPDATA%/wallpaper-crop-tool/ratios.json`
+  - macOS: `~/Library/Application Support/wallpaper-crop-tool/ratios.json`
+  - Linux: `~/.config/wallpaper-crop-tool/ratios.json` (respects `$XDG_CONFIG_HOME`)
+  - Auto-created with defaults on first launch
+  - Automatic fallback to defaults if file is missing or corrupted
+- ⚙️ "Edit Ratios…" button in the Aspect Ratios panel
+
+### Changed
+
+- **Nested JSON format** with versioned envelope: `{"version": 1, "ratios": [...]}` where each ratio group contains a `targets` array of export resolutions
+- `RATIOS` in `config.py` renamed to `DEFAULT_RATIOS` (now a built-in fallback only)
+- Ratio buttons are dynamically rebuilt when ratios change — no restart needed
+- Crop positions are preserved when editing ratios: matching aspect keys keep their crops, new aspect ratios get auto-center-max, removed ratios' crops are discarded
+- `ImageState.crops` is keyed by normalized aspect key (e.g. `"16:9"`) instead of ratio name
+- Worker processes iterate groups → targets, cropping once per aspect ratio then resizing to each target
+
 ## 1.2.0 — 2026-02-06
 
 ### Added

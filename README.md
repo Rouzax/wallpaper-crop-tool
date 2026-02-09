@@ -25,22 +25,34 @@ The folder structure is preserved in the output, so your organized collection st
 ### Interactive Crop Editor with Logo Overlay
 Adjust crop position and size for each aspect ratio. The logo overlay preview (TopRight, 25%) shows exactly what the export will look like.
 
-![Crop Editor](docs/screenshot-crop-editor.png)
+![Crop Editor](docs/screenshot-crop-editor.jpg)
 
 ### Batch Export Progress
 Parallel export with progress tracking — processes multiple images simultaneously across CPU cores. The ✅ icons confirm which images have been exported.
 
-![Batch Export](docs/screenshot-batch-export.png)
+![Batch Export](docs/screenshot-batch-export.jpg)
 
 ### Logo Overlay — Center Position
 The logo overlay supports multiple positions and sizes. Here the logo is centered at 50% of the shorter side.
 
-![Logo Overlay](docs/screenshot-exported.png)
+![Logo Overlay](docs/screenshot-exported.jpg)
+
+### Ratio Editor
+Two-panel layout: ratio groups on the left, export targets on the right. Add ratios, add targets per ratio, reorder groups, and reset to defaults — duplicate aspect ratios are automatically detected.
+
+![Ratio Editor](docs/screenshot-ratio-editor.jpg)
+
+### JPEG Export with Logo Overlay
+Export as JPEG with configurable quality and chroma subsampling. The logo overlay (BottomLeft, 25%) is composited at full export resolution.
+
+![JPEG Export](docs/screenshot-jpeg-export.jpg)
 
 ## Features
 
 - **Interactive crop editor** — drag to reposition, drag corners to resize (aspect ratio locked)
 - **Multiple aspect ratios** — switch between ratios per image, each remembers its own crop position
+- **Ratio grouping** — one crop per aspect ratio, shared across multiple export resolutions (e.g. crop 16:9 once, export at both 4K and 1080p)
+- **Two-panel ratio editor** — add ratio groups and export targets from a built-in GUI (⚙️ button), with duplicate aspect-ratio detection and live validation
 - **Logo overlay** — optionally composite an SVG or PNG logo onto exports with configurable position, size, and margin, with live preview
 - **Rule-of-thirds overlay** — helps with composition
 - **PSD support** — reads Photoshop files directly via `psd-tools`, flattens layers automatically
@@ -131,51 +143,76 @@ A counter below the image list shows overall progress: `👁 12/45 reviewed · �
 
 ## Output Structure
 
-With subfolder scanning enabled, the output mirrors your input structure:
+With subfolder scanning enabled, the output mirrors your input structure. Each export target gets its own folder:
 
 ```
 Output/
-├── Ratio 16x9/
+├── Ratio 16x9 4K/
 │   ├── places/landscapes/beaches/
 │   │   └── wallpaper.png    (3840×2160)
-│   ├── places/landscapes/mountains/
-│   │   └── wallpaper.png    (3840×2160)
+│   └── places/landscapes/mountains/
+│       └── wallpaper.png    (3840×2160)
+├── Ratio 16x9 FHD/
+│   ├── places/landscapes/beaches/
+│   │   └── wallpaper.png    (1920×1080)
+│   └── ...
 ├── Ratio 16x10/
-│   ├── places/landscapes/beaches/
-│   │   └── wallpaper.png    (3840×2400)
 │   └── ...
 ├── Ratio 12x5/
 │   └── ...
 ```
 
+When a ratio group has multiple targets (e.g. 16:9 at both 4K and 1080p), both outputs share the same crop position — you position the crop once and get every resolution.
+
 ## Configuration
 
-### Adding or Changing Ratios
+### Ratio Configuration
 
-Edit the `RATIOS` list in `wallpaper_crop_tool/config.py`:
+Ratios are stored in a JSON file in your user config directory and can be edited from the app:
 
-```python
-RATIOS = [
+1. Click the **⚙️ Edit Ratios…** button in the Aspect Ratios panel
+2. **Left panel — Ratio groups**: add, remove, and reorder aspect ratio groups
+3. **Right panel — Targets**: add and remove export resolutions for the selected group
+4. **Add a ratio**: enter an aspect ratio (e.g. `21:9`) and a target width — the height is auto-computed. Duplicate aspect ratios are blocked (e.g. `42:18` when `21:9` already exists)
+5. **Add a target**: enter a target width for an existing ratio group — useful for exporting the same crop at multiple resolutions
+6. Click **OK** to save — ratio buttons update immediately, no restart needed
+
+Existing crop positions are preserved for unchanged aspect ratios. New ratios get auto-centered maximum crops.
+
+The config file is located at:
+
+| Platform | Path |
+| -------- | ---- |
+| Windows  | `%APPDATA%\wallpaper-crop-tool\ratios.json` |
+| macOS    | `~/Library/Application Support/wallpaper-crop-tool/ratios.json` |
+| Linux    | `~/.config/wallpaper-crop-tool/ratios.json` |
+
+On first launch the file is created automatically with the built-in defaults (16:9, 16:10, 12:5). If the file is missing or corrupted, the defaults are restored.
+
+You can also edit `ratios.json` directly. It uses a versioned envelope with nested ratio groups:
+
+```json
+{
+  "version": 1,
+  "ratios": [
     {
-        "name": "16:9",
-        "ratio_w": 16,
-        "ratio_h": 9,
-        "target_w": 3840,
-        "target_h": 2160,
-        "folder": "Ratio 16x9",
-    },
-    {
-        "name": "21:9",        # Add ultrawide
-        "ratio_w": 21,
-        "ratio_h": 9,
-        "target_w": 3440,
-        "target_h": 1440,
-        "folder": "Ratio 21x9",
-    },
-]
+      "name": "16:9",
+      "ratio_w": 16,
+      "ratio_h": 9,
+      "targets": [
+        { "target_w": 3840, "target_h": 2160, "folder": "Ratio 16x9 4K" },
+        { "target_w": 1920, "target_h": 1080, "folder": "Ratio 16x9 FHD" }
+      ]
+    }
+  ]
+}
 ```
 
+Each ratio group has a `targets` array containing one or more export resolutions. All targets in a group share the same crop position.
+
 ### Other Settings
+
+These constants are in `wallpaper_crop_tool/config.py`:
 
 | Setting              | Default | Description                                        |
 | -------------------- | ------- | -------------------------------------------------- |
