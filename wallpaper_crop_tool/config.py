@@ -4,7 +4,32 @@ Application constants and configuration.
 DEFAULT_RATIOS provides the built-in fallback ratios. Runtime ratios are
 loaded from ratios.json via the ratios module. All other constants control
 crop-editor behaviour, file handling, and logo-overlay defaults.
+
+The ``config_dir()`` helper returns the platform-appropriate config
+directory and is shared by all persistence modules (ratios, crop cache).
 """
+
+import os
+import sys
+from pathlib import Path
+
+# =============================================================================
+# APP IDENTITY & CONFIG DIRECTORY
+# =============================================================================
+APP_NAME = "wallpaper-crop-tool"
+
+
+def config_dir() -> Path:
+    """Return the platform-appropriate config directory, creating it if needed."""
+    if sys.platform == "win32":
+        base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+    else:
+        base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    directory = base / APP_NAME
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
 
 # =============================================================================
 # DEFAULT RATIOS — Built-in fallback when ratios.json is missing or corrupt

@@ -34,6 +34,7 @@ class ImageState:
     img_w: int = 0
     img_h: int = 0
     crops: dict = field(default_factory=dict)  # aspect_key (e.g. "16:9") -> CropRect
+    fingerprint: str = ""   # content fingerprint for crop cache lookup
     reviewed: bool = False   # user has visited this image
     processed: bool = False  # image has been exported
 

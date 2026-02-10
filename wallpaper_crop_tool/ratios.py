@@ -1,9 +1,10 @@
 """
-Ratios persistence: load, save, validate, and platform-aware config path.
+Ratios persistence: load, save, and validate ratio configuration.
 
-Runtime ratios are stored in a JSON file in the user's config directory.
-On first launch (or if the file is missing/corrupt), the file is created
-from DEFAULT_RATIOS.  This module is Qt-free and safe for worker import.
+Runtime ratios are stored in a JSON file in the user's config directory
+(provided by ``config.config_dir()``).  On first launch (or if the file
+is missing/corrupt), the file is created from DEFAULT_RATIOS.  This
+module is Qt-free and safe for worker import.
 
 The on-disk format uses a versioned envelope::
 
@@ -17,16 +18,14 @@ normalized aspect ratio.
 import json
 import logging
 import os
-import sys
 from copy import deepcopy
 from math import gcd
 from pathlib import Path
 
-from wallpaper_crop_tool.config import DEFAULT_RATIOS
+from wallpaper_crop_tool.config import DEFAULT_RATIOS, config_dir
 
 logger = logging.getLogger(__name__)
 
-_APP_NAME = "wallpaper-crop-tool"
 _RATIOS_FILENAME = "ratios.json"
 _FORMAT_VERSION = 1
 
@@ -63,22 +62,9 @@ def aspect_key(w: int, h: int) -> str:
 # =============================================================================
 # Config directory helpers
 # =============================================================================
-def _config_dir() -> Path:
-    """Return the platform-appropriate config directory, creating it if needed."""
-    if sys.platform == "win32":
-        base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
-    elif sys.platform == "darwin":
-        base = Path.home() / "Library" / "Application Support"
-    else:
-        base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    config = base / _APP_NAME
-    config.mkdir(parents=True, exist_ok=True)
-    return config
-
-
 def _ratios_path() -> Path:
     """Return the full path to ratios.json."""
-    return _config_dir() / _RATIOS_FILENAME
+    return config_dir() / _RATIOS_FILENAME
 
 
 # =============================================================================
@@ -273,7 +259,7 @@ def save_ratios(ratios: list[dict]) -> None:
     """
     errors = validate_ratios(ratios)
     if errors:
-        raise ValueError(f"Invalid ratios data:\n  " + "\n  ".join(errors))
+        raise ValueError("Invalid ratios data:\n  " + "\n  ".join(errors))
 
     envelope = {"version": _FORMAT_VERSION, "ratios": ratios}
     path = _ratios_path()

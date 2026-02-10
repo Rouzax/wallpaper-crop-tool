@@ -63,6 +63,7 @@ Export as JPEG with configurable quality and chroma subsampling. The logo overla
 - **Keyboard-driven workflow** — navigate images and ratios without touching the mouse
 - **Large image support** — handles images exceeding Pillow's default 178MP limit
 - **Duplicate protection** — automatically appends `-01`, `-02` if filenames collide
+- **Crop memory** — crop positions persist across restarts; images are identified by content fingerprint so renames and moves don't lose your work
 
 ## Keyboard Shortcuts
 
@@ -209,6 +210,14 @@ You can also edit `ratios.json` directly. It uses a versioned envelope with nest
 ```
 
 Each ratio group has a `targets` array containing one or more export resolutions. All targets in a group share the same crop position.
+
+### Crop Cache
+
+Crop positions are saved automatically to `crop_cache.json` in the same config directory. When you rescan a folder (or scan a different folder containing the same images), previously set crop positions are restored automatically.
+
+Images are identified by a content fingerprint (SHA-256 of the first 64 KB + file size), so renaming or moving files does not lose your saved crops. If an image is replaced with a different file at the same path, the stale cache entry is ignored and the crop defaults to auto-center.
+
+The cache file is managed automatically — no user action is required. If deleted, the app simply starts fresh with auto-centered crops for all images.
 
 ### Other Settings
 

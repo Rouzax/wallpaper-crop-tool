@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.4.0 — 2026-02-10
+
+### Added
+
+- **Crop cache**: crop positions are remembered across application restarts
+  - Crops survive rename, move, and rescan — images are identified by content fingerprint (SHA-256 of first 64 KB + file size), not file path
+  - Cache file stored alongside `ratios.json` in the user config directory: `crop_cache.json`
+  - Automatic restore on rescan: previously cropped images show their saved positions instead of auto-center defaults
+  - Dimension validation: if an image is replaced with a different resolution at the same path, the stale cache entry is ignored
+  - Graceful degradation: missing or corrupt cache file is silently treated as empty (auto-center-max for all images, same as before)
+  - Cache is saved automatically on image navigation, ratio editing, and application close — no user action required
+
+### Changed
+
+- **Shared config directory**: `config_dir()` and `APP_NAME` extracted from `ratios.py` into `config.py` so multiple persistence modules (ratios, crop cache) share the same path logic
+
 ## 1.3.0 — 2026-02-09
 
 ### Added

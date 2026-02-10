@@ -30,8 +30,9 @@ from wallpaper_crop_tool.config import (
 )
 from wallpaper_crop_tool.ratios import load_ratios, save_ratios, aspect_key
 from wallpaper_crop_tool.ratio_editor import RatioEditorDialog
-from wallpaper_crop_tool.models import ImageState, CropRect, auto_center_max
-from wallpaper_crop_tool.image_io import open_image, get_image_size, unique_path
+from wallpaper_crop_tool.models import ImageState, auto_center_max
+from wallpaper_crop_tool.image_io import open_image, get_image_size, unique_path, compute_fingerprint
+from wallpaper_crop_tool.crop_cache import load_crop_cache, save_crop_cache, lookup_crops, store_crops
 from wallpaper_crop_tool.logo import HAS_MAGICK, composite_logo
 from wallpaper_crop_tool.worker import process_worker
 from wallpaper_crop_tool.crop_widget import ImageCropWidget, ImageLoaderThread
@@ -50,6 +51,7 @@ class MainWindow(QMainWindow):
         self._output_root: Path | None = None
         self._input_folder: Path | None = None
         self._loader: ImageLoaderThread | None = None
+        self._crop_cache: dict = load_crop_cache()
 
         # Logo overlay state
         self._logo_path: Path | None = None
@@ -251,6 +253,11 @@ class MainWindow(QMainWindow):
                         state.img_w, state.img_h,
                         r["ratio_w"], r["ratio_h"],
                     )
+            # Update cache with reconciled crops
+            if state.fingerprint:
+                store_crops(self._crop_cache, state.fingerprint,
+                            state.img_w, state.img_h, state.crops)
+        self._save_cache()
 
         # Update instance state and rebuild UI
         self._ratios = new_ratios
@@ -650,12 +657,23 @@ class MainWindow(QMainWindow):
             except Exception:
                 continue
 
+            # Compute content fingerprint for cache lookup
+            try:
+                fp = compute_fingerprint(f)
+            except OSError:
+                fp = ""
+
             rel = f.relative_to(self._input_folder)
-            state = ImageState(path=f, rel_path=rel, img_w=w, img_h=h)
-            # Initialize crops to auto-center-max for all ratio groups (keyed by aspect)
+            state = ImageState(path=f, rel_path=rel, img_w=w, img_h=h, fingerprint=fp)
+
+            # Restore cached crops if available, otherwise auto-center-max
+            cached = lookup_crops(self._crop_cache, fp, w, h) if fp else None
             for r in self._ratios:
                 akey = aspect_key(r["ratio_w"], r["ratio_h"])
-                state.crops[akey] = auto_center_max(w, h, r["ratio_w"], r["ratio_h"])
+                if cached and akey in cached:
+                    state.crops[akey] = cached[akey]
+                else:
+                    state.crops[akey] = auto_center_max(w, h, r["ratio_w"], r["ratio_h"])
             self._image_states.append(state)
 
             # Show relative path in list if scanning subfolders
@@ -670,6 +688,8 @@ class MainWindow(QMainWindow):
             self._status.showMessage(f"Loaded {len(self._image_states)} images from {self._input_folder}")
         else:
             self._status.showMessage("No supported images found in the selected folder.")
+
+        self._save_cache()
 
         self._update_button_states()
         self._update_counter()
@@ -686,6 +706,7 @@ class MainWindow(QMainWindow):
 
         # Save current crop before switching
         self._save_current_crop()
+        self._save_cache()
 
         self._current_index = row
         state = self._image_states[row]
@@ -763,6 +784,10 @@ class MainWindow(QMainWindow):
         r = self._ratios[self._current_ratio_idx]
         akey = aspect_key(r["ratio_w"], r["ratio_h"])
         state.crops[akey] = self._crop_widget.get_crop()
+        # Update in-memory cache
+        if state.fingerprint:
+            store_crops(self._crop_cache, state.fingerprint,
+                        state.img_w, state.img_h, state.crops)
 
     def _on_crop_changed(self):
         self._save_current_crop()
@@ -797,6 +822,10 @@ class MainWindow(QMainWindow):
         state.crops[akey] = crop
         self._crop_widget.set_crop(crop, r["ratio_w"] / r["ratio_h"])
         self._update_crop_info()
+        # Update cache with reset crop
+        if state.fingerprint:
+            store_crops(self._crop_cache, state.fingerprint,
+                        state.img_w, state.img_h, state.crops)
 
     def _auto_center_all_ratios(self):
         if self._current_index < 0:
@@ -806,6 +835,10 @@ class MainWindow(QMainWindow):
             akey = aspect_key(r["ratio_w"], r["ratio_h"])
             state.crops[akey] = auto_center_max(state.img_w, state.img_h, r["ratio_w"], r["ratio_h"])
         self._apply_ratio(self._current_ratio_idx)
+        # Update cache with all reset crops
+        if state.fingerprint:
+            store_crops(self._crop_cache, state.fingerprint,
+                        state.img_w, state.img_h, state.crops)
 
     # =========================================================================
     # Navigation
@@ -1055,3 +1088,17 @@ class MainWindow(QMainWindow):
         self._counter_label.setText(
             f"  👁 {reviewed}/{total} reviewed  ·  ✅ {exported}/{total} exported  "
         )
+
+    # =========================================================================
+    # Cache persistence
+    # =========================================================================
+
+    def _save_cache(self):
+        """Flush the in-memory crop cache to disk."""
+        save_crop_cache(self._crop_cache)
+
+    def closeEvent(self, event):
+        """Save current crop and flush cache before closing."""
+        self._save_current_crop()
+        self._save_cache()
+        super().closeEvent(event)
