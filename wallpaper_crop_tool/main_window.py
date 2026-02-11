@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QListWidget, QListWidgetItem, QPushButton, QLabel, QFileDialog,
     QSplitter, QGroupBox, QMessageBox, QProgressDialog, QStatusBar,
     QToolBar, QCheckBox, QComboBox, QSpinBox, QSlider, QApplication,
+    QScrollArea,
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap, QImage, QAction, QKeySequence, QShortcut
@@ -42,7 +43,18 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Wallpaper Batch Crop Tool")
-        self.resize(1280, 800)
+        self.setMinimumSize(900, 500)
+
+        # Screen-aware startup size: default 1280×800, clamped to 80% of screen
+        preferred_w, preferred_h = 1920, 1080
+        screen = QApplication.primaryScreen()
+        if screen is not None:
+            avail = screen.availableGeometry()
+            max_w = int(avail.width() * 0.8)
+            max_h = int(avail.height() * 0.8)
+            preferred_w = min(preferred_w, max_w)
+            preferred_h = min(preferred_h, max_h)
+        self.resize(preferred_w, preferred_h)
 
         self._image_states: list[ImageState] = []
         self._current_index = -1
@@ -159,24 +171,39 @@ class MainWindow(QMainWindow):
         return left_panel
 
     def _build_right_panel(self) -> QWidget:
-        right_panel = QWidget()
-        right_panel.setFixedWidth(240)
-        right_layout = QVBoxLayout(right_panel)
-        right_layout.setContentsMargins(4, 0, 0, 0)
+        # Inner widget holds all the controls
+        inner = QWidget()
+        inner_layout = QVBoxLayout(inner)
+        inner_layout.setContentsMargins(0, 0, 0, 0)
 
-        right_layout.addWidget(self._build_ratio_group())
+        inner_layout.addWidget(self._build_ratio_group())
 
         # Crop info
         self._crop_info_label = QLabel("Crop: —")
         self._crop_info_label.setWordWrap(True)
-        right_layout.addWidget(self._crop_info_label)
+        inner_layout.addWidget(self._crop_info_label)
 
-        right_layout.addWidget(self._build_actions_group())
-        right_layout.addWidget(self._build_export_group())
-        right_layout.addWidget(self._build_logo_group())
-        right_layout.addWidget(self._build_shortcuts_group())
+        inner_layout.addWidget(self._build_actions_group())
+        inner_layout.addWidget(self._build_export_group())
+        inner_layout.addWidget(self._build_logo_group())
+        inner_layout.addWidget(self._build_shortcuts_group())
 
-        right_layout.addStretch()
+        inner_layout.addStretch()
+
+        # Scroll area wraps the inner widget so the panel can shrink
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(inner)
+        scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        scroll.setFrameShape(scroll.Shape.NoFrame)
+
+        right_panel = QWidget()
+        right_panel.setFixedWidth(240)
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(4, 0, 0, 0)
+        right_layout.addWidget(scroll)
         return right_panel
 
     def _build_ratio_group(self) -> QGroupBox:

@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.4.1 — 2026-02-11
+
+### Fixed
+
+- Right panel now wraps in a scroll area, allowing the window to shrink to smaller heights without being blocked by the stacked control groups
+
+### Changed
+
+- **Screen-aware startup sizing**: window defaults to 1920×1080 but clamps to 80% of available screen geometry (excluding taskbar), so it opens at the best size for any display
+- Added minimum window size of 900×500 to keep the UI usable
+
 ## 1.4.0 — 2026-02-10
 
 ### Added
