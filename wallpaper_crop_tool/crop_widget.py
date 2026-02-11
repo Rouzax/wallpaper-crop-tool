@@ -131,10 +131,15 @@ class ImageCropWidget(QWidget):
     def get_crop(self) -> CropRect:
         return CropRect(self._crop.x, self._crop.y, self._crop.w, self._crop.h)
 
+    def has_image(self) -> bool:
+        """Return True if an image is loaded and ready for crop operations."""
+        return self._pixmap is not None
+
     def clear(self):
         self._pixmap = None
         self._img_w = 0
         self._img_h = 0
+        self._crop = CropRect()
         self.update()
 
     def set_logo(self, pixmap: QPixmap | None, config: dict | None):

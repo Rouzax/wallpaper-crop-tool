@@ -807,6 +807,10 @@ class MainWindow(QMainWindow):
     def _save_current_crop(self):
         if self._current_index < 0 or not self._ratios:
             return
+        # Don't save while the image is still loading asynchronously —
+        # the widget crop would be stale (previous image) or default (0×0).
+        if not self._crop_widget.has_image():
+            return
         state = self._image_states[self._current_index]
         r = self._ratios[self._current_ratio_idx]
         akey = aspect_key(r["ratio_w"], r["ratio_h"])

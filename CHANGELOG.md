@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- **Crop cache corruption on image open** — `_save_current_crop()` could write a stale 0×0 crop to the cache when called during async image loading (e.g. rapid navigation or closing the app before the first image finished loading). The widget now exposes `has_image()` and save is skipped when no image is loaded. `clear()` also resets the crop rect to prevent stale data from a previous image leaking through.
 - Right panel now wraps in a scroll area, allowing the window to shrink to smaller heights without being blocked by the stacked control groups
 
 ### Changed
