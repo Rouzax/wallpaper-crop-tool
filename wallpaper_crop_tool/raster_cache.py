@@ -41,6 +41,16 @@ def get_cached_raster(fingerprint: str) -> Path | None:
     return p if p.is_file() else None
 
 
+def clear_cache() -> None:
+    """Remove all cached raster files."""
+    d = config_dir() / _CACHE_DIR_NAME
+    if not d.is_dir():
+        return
+    for f in d.iterdir():
+        if f.is_file():
+            f.unlink(missing_ok=True)
+
+
 def store_raster(fingerprint: str, pil_image: Image.Image) -> None:
     """Save a PIL image as PNG to the raster cache."""
     if not fingerprint:

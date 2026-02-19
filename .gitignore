@@ -39,3 +39,6 @@ CLAUDE.md
 
 # Local scripts
 run.sh
+
+# Test files
+tmp/

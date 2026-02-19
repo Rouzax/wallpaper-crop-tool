@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.5.0 — 2026-02-19
+
+### Added
+
+- **AI file support**: open and export Adobe Illustrator (`.ai`) files via ImageMagick + Ghostscript
+  - Rasterized at computed density to match `AI_RASTER_MIN_PIXELS` (3840 px longest side)
+  - Dimensions probed mathematically from 72 DPI base points — no redundant subprocess calls
+- **Raster cache**: AI file rasters are cached as PNGs in the config directory, keyed by content fingerprint — subsequent opens are instant
+  - Cache is automatically cleaned on application close
+- **Batch AI pre-rasterization**: when opening a folder, uncached AI files are pre-rasterized with a modal progress dialog so switching between images is instant
+  - Per-file progress with filename display
+  - Cancel support — remaining files load on-demand when selected
+  - Errors are collected and reported in a summary dialog after completion
+- **Version in title bar**: window title now shows `Wallpaper Batch Crop Tool v{version}`
+
+### Fixed
+
+- **AI pre-rasterization dialog on Windows**: disabled `autoReset` and `autoClose` on `QProgressDialog` and switched from `setMinimumDuration` timer to explicit `dlg.show()` — fixes dialog never appearing or racing with `QEventLoop.quit()` on Windows
+- **Progress reporting**: worker now emits progress *after* each file completes (not before), so `setValue(0)` no longer appears as a no-op on the first file
+
+### Changed
+
+- Removed PDF stream pre-check for AI files — errors from Ghostscript now bubble up naturally with descriptive messages
+- AI raster preview resolution reduced from 7680 to 3840 pixels (longest side) for faster rasterization
+
 ## 1.4.1 — 2026-02-11
 
 ### Fixed

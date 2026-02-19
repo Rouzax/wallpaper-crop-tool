@@ -1,3 +1,3 @@
 """Wallpaper Batch Crop Tool — interactive multi-ratio crop and export."""
 
-__version__ = "1.4.1"
+__version__ = "1.5.0"

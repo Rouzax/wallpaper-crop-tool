@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wallpaper-crop-tool"
-version = "1.4.1"
+version = "1.5.0"
 description = "Interactive batch crop and resize tool for wallpapers across multiple screen ratios"
 readme = "README.md"
 license = {text = "MIT"}

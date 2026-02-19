@@ -8,6 +8,7 @@ Safe to import in worker processes.
 
 import hashlib
 import io
+import os
 import subprocess
 from pathlib import Path
 
@@ -22,9 +23,6 @@ Image.MAX_IMAGE_PIXELS = None
 
 # Number of bytes read for fingerprinting (64 KB)
 _FINGERPRINT_READ_SIZE = 65_536
-
-# Bytes to scan for PDF marker in AI files
-_PDF_SCAN_SIZE = 32_768
 
 
 def compute_fingerprint(path: Path) -> str:
@@ -43,26 +41,6 @@ def compute_fingerprint(path: Path) -> str:
     with open(path, "rb") as f:
         sha.update(f.read(_FINGERPRINT_READ_SIZE))
     return f"{size:x}_{sha.hexdigest()[:16]}"
-
-
-def has_pdf_stream(path: Path) -> bool:
-    """Check whether an AI file contains an embedded PDF stream.
-
-    AI files saved with "PDF Compatible" mode in Illustrator embed a PDF
-    stream that Ghostscript can rasterize.  Files without it will fail.
-    """
-    with open(path, "rb") as f:
-        head = f.read(_PDF_SCAN_SIZE)
-    return b"%PDF-" in head
-
-
-def _require_pdf_stream(path: Path) -> None:
-    """Raise RuntimeError if an AI file lacks an embedded PDF stream."""
-    if not has_pdf_stream(path):
-        raise RuntimeError(
-            "AI file has no embedded PDF stream — "
-            "save with PDF compatibility enabled in Illustrator"
-        )
 
 
 def _probe_ai_points(path: Path) -> tuple[int, int]:
@@ -90,13 +68,24 @@ def _ai_preview_density(w72: int, h72: int) -> int:
     return min(density, AI_RASTER_MAX_DENSITY)
 
 
+def _gs_env() -> dict[str, str]:
+    """Environment for ImageMagick subprocesses that invoke Ghostscript.
+
+    Sets ``-dDOINTERPOLATE`` to smooth embedded raster imagery in AI files.
+    Some AI files (especially those with complex gradient meshes) may still
+    show minor artifacts — this is a Ghostscript limitation.
+    """
+    env = os.environ.copy()
+    env["GS_OPTIONS"] = "-dDOINTERPOLATE"
+    return env
+
+
 def _rasterize_ai(path: Path, fingerprint: str = "") -> Image.Image:
     """Rasterize an AI file to a PIL Image at preview resolution.
 
     If *fingerprint* is provided, the result is cached to disk as PNG
     so subsequent opens are instant.
     """
-    _require_pdf_stream(path)
     # Return cached raster if available
     cached = get_cached_raster(fingerprint)
     if cached is not None:
@@ -105,9 +94,9 @@ def _rasterize_ai(path: Path, fingerprint: str = "") -> Image.Image:
     w72, h72 = _probe_ai_points(path)
     density = _ai_preview_density(w72, h72)
     result = subprocess.run(
-        magick_cmd("-density", str(density), "-background", "white",
+        magick_cmd("-density", str(density), "-background", "white", "-colorspace", "sRGB",
                    f"{path}[0]", "-flatten", "PNG:-"),
-        capture_output=True, timeout=120,
+        capture_output=True, timeout=120, env=_gs_env(),
     )
     if result.returncode != 0:
         raise RuntimeError(f"ImageMagick rasterize failed: {result.stderr.decode(errors='replace')}")
@@ -123,7 +112,6 @@ def _get_ai_size(path: Path) -> tuple[int, int]:
     dimensions, then computes final pixel dimensions mathematically —
     no second subprocess needed.
     """
-    _require_pdf_stream(path)
     w72, h72 = _probe_ai_points(path)
     density = _ai_preview_density(w72, h72)
     return round(w72 * density / 72), round(h72 * density / 72)
@@ -149,7 +137,6 @@ def rasterize_ai_cropped(
         Dimensions of the preview raster (used to relate crop coordinates to density).
     """
     x, y, w, h = crop
-    _require_pdf_stream(path)
     w72, h72 = _probe_ai_points(path)
     preview_density = _ai_preview_density(w72, h72)
 
@@ -161,9 +148,9 @@ def rasterize_ai_cropped(
         needs_resize = True
 
     result = subprocess.run(
-        magick_cmd("-density", str(export_density), "-background", "white",
+        magick_cmd("-density", str(export_density), "-background", "white", "-colorspace", "sRGB",
                    f"{path}[0]", "-flatten", "PNG:-"),
-        capture_output=True, timeout=120,
+        capture_output=True, timeout=120, env=_gs_env(),
     )
     if result.returncode != 0:
         raise RuntimeError(f"ImageMagick rasterize failed: {result.stderr.decode(errors='replace')}")

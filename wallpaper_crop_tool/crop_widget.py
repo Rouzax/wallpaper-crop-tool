@@ -63,6 +63,37 @@ class ImageLoaderThread(QThread):
             self.error.emit(str(e))
 
 
+class AiRasterWorker(QThread):
+    """Pre-rasterize a batch of AI files in the background."""
+    progress = pyqtSignal(int, str)     # (completed_count, filename)
+    finished = pyqtSignal(list)         # list of (filename, error_msg)
+
+    def __init__(self, ai_files: list[tuple[Path, str]], parent=None):
+        super().__init__(parent)
+        self._ai_files = ai_files
+        self._cancelled = False
+
+    def cancel(self):
+        self._cancelled = True
+
+    def run(self):
+        import logging
+        logger = logging.getLogger(__name__)
+        errors = []
+        total = len(self._ai_files)
+        for i, (path, fp) in enumerate(self._ai_files):
+            if self._cancelled:
+                break
+            logger.info("Pre-rasterizing AI file %d/%d: %s", i + 1, total, path.name)
+            try:
+                open_image(path, fingerprint=fp)
+            except Exception as e:
+                logger.warning("Failed to rasterize %s: %s", path.name, e)
+                errors.append((path.name, str(e)))
+            self.progress.emit(i + 1, path.name)
+        self.finished.emit(errors)
+
+
 # =============================================================================
 # Image Crop Widget — interactive crop overlay on image
 # =============================================================================

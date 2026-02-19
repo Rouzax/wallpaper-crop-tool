@@ -146,8 +146,8 @@ def magick_cmd(*args: str) -> list[str]:
 
 
 # AI file rasterization constants
-AI_RASTER_MIN_PIXELS = 7680   # Longest side for preview raster
-AI_RASTER_MAX_DENSITY = 600   # Safety cap for ImageMagick density
+AI_RASTER_MIN_PIXELS = 3840   # Longest side for preview raster
+AI_RASTER_MAX_DENSITY = 4800  # Safety cap for ImageMagick density
 
 # Supported image extensions (AI requires ImageMagick + Ghostscript)
 _IMAGE_EXTENSIONS_BASE = {".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif", ".webp", ".psd"}

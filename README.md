@@ -241,6 +241,8 @@ These constants are in `wallpaper_crop_tool/config.py`:
 
 **Output:** PNG (maximum compression) or JPEG (configurable quality, subsampling, Huffman optimization)
 
+> **Note on AI files:** Adobe Illustrator files are rasterized by Ghostscript, which does not support every Illustrator feature. Files that use standard vector shapes, text, and simple gradients will render accurately. However, files that rely on advanced Illustrator-specific features — such as complex gradient meshes, certain blend modes, or live effects — may show minor visual artifacts like cloudiness or banding. This is a limitation of Ghostscript, not the crop tool. For best results with these files, export them to PNG or PSD from Illustrator first.
+
 ## License
 
 [MIT](LICENSE)

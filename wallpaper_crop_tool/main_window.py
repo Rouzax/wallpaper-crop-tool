@@ -19,9 +19,10 @@ from PyQt6.QtWidgets import (
     QToolBar, QCheckBox, QComboBox, QSpinBox, QSlider, QApplication,
     QScrollArea,
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QEventLoop
 from PyQt6.QtGui import QPixmap, QImage, QAction, QKeySequence, QShortcut
 
+from wallpaper_crop_tool import __version__
 from wallpaper_crop_tool.config import (
     PNG_COMPRESS_LEVEL, IMAGE_EXTENSIONS, HAS_MAGICK, HAS_GHOSTSCRIPT, magick_cmd,
     LOGO_POSITIONS, LOGO_BASE_DIMENSIONS,
@@ -33,16 +34,17 @@ from wallpaper_crop_tool.ratios import load_ratios, save_ratios, aspect_key
 from wallpaper_crop_tool.ratio_editor import RatioEditorDialog
 from wallpaper_crop_tool.models import ImageState, auto_center_max
 from wallpaper_crop_tool.image_io import open_image, get_image_size, unique_path, compute_fingerprint
+from wallpaper_crop_tool.raster_cache import clear_cache as clear_raster_cache, get_cached_raster
 from wallpaper_crop_tool.crop_cache import load_crop_cache, save_crop_cache, lookup_crops, store_crops
 from wallpaper_crop_tool.logo import composite_logo
 from wallpaper_crop_tool.worker import process_worker
-from wallpaper_crop_tool.crop_widget import ImageCropWidget, ImageLoaderThread
+from wallpaper_crop_tool.crop_widget import ImageCropWidget, ImageLoaderThread, AiRasterWorker
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Wallpaper Batch Crop Tool")
+        self.setWindowTitle(f"Wallpaper Batch Crop Tool v{__version__}")
         self.setMinimumSize(900, 500)
 
         # Screen-aware startup size: default 1280×800, clamped to 80% of screen
@@ -720,6 +722,16 @@ class MainWindow(QMainWindow):
 
         progress.setValue(len(files))
 
+        # Pre-rasterize uncached AI files so switching is instant
+        uncached_ai = [
+            (s.path, s.fingerprint)
+            for s in self._image_states
+            if s.path.suffix.lower() == ".ai"
+            and get_cached_raster(s.fingerprint) is None
+        ]
+        if uncached_ai:
+            self._pre_rasterize_ai(uncached_ai)
+
         # Warn about AI files needing Ghostscript
         self._warn_ai_without_ghostscript()
 
@@ -748,6 +760,53 @@ class MainWindow(QMainWindow):
 
         self._update_button_states()
         self._update_counter()
+
+    def _pre_rasterize_ai(self, ai_files: list[tuple[Path, str]]):
+        """Show a modal progress dialog while pre-rasterizing AI files."""
+        total = len(ai_files)
+        dlg = QProgressDialog(
+            "Preparing Illustrator file previews…", "Cancel", 0, total, self,
+        )
+        dlg.setWindowModality(Qt.WindowModality.WindowModal)
+        dlg.setAutoReset(False)
+        dlg.setAutoClose(False)
+        dlg.setValue(0)
+        dlg.show()
+
+        raster_errors: list[tuple[str, str]] = []
+        loop = QEventLoop(self)
+        worker = AiRasterWorker(ai_files, parent=self)
+
+        def on_progress(completed: int, name: str):
+            dlg.setValue(completed)
+            dlg.setLabelText(f"Rasterized: {name}  ({completed}/{total})")
+
+        def on_finished(errors: list):
+            raster_errors.extend(errors)
+            dlg.close()
+            loop.quit()
+
+        worker.progress.connect(on_progress)
+        worker.finished.connect(on_finished)
+        dlg.canceled.connect(worker.cancel)
+        dlg.canceled.connect(loop.quit)
+
+        worker.start()
+        loop.exec()
+
+        if raster_errors:
+            cap = 20
+            lines = [f"• {name}: {err}" for name, err in raster_errors[:cap]]
+            if len(raster_errors) > cap:
+                lines.append(f"…and {len(raster_errors) - cap} more")
+            QMessageBox.warning(
+                self, "AI Rasterization Errors",
+                f"{len(raster_errors)} AI file(s) could not be pre-rasterized:\n\n"
+                + "\n".join(lines),
+            )
+
+        # Let a cancelled worker finish its current file in the background;
+        # parent reference prevents GC until MainWindow is destroyed.
 
     def _warn_ai_without_ghostscript(self):
         """Show a one-time info dialog if AI files are present but Ghostscript is missing."""
@@ -1179,4 +1238,5 @@ class MainWindow(QMainWindow):
         """Save current crop and flush cache before closing."""
         self._save_current_crop()
         self._save_cache()
+        clear_raster_cache()
         super().closeEvent(event)
