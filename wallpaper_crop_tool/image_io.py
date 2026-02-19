@@ -15,12 +15,16 @@ from PIL import Image
 from psd_tools import PSDImage
 
 from wallpaper_crop_tool.config import AI_RASTER_MIN_PIXELS, AI_RASTER_MAX_DENSITY, magick_cmd
+from wallpaper_crop_tool.raster_cache import get_cached_raster, store_raster
 
 # Allow very large images (Pillow's default limit is ~178MP)
 Image.MAX_IMAGE_PIXELS = None
 
 # Number of bytes read for fingerprinting (64 KB)
 _FINGERPRINT_READ_SIZE = 65_536
+
+# Bytes to scan for PDF marker in AI files
+_PDF_SCAN_SIZE = 32_768
 
 
 def compute_fingerprint(path: Path) -> str:
@@ -39,6 +43,26 @@ def compute_fingerprint(path: Path) -> str:
     with open(path, "rb") as f:
         sha.update(f.read(_FINGERPRINT_READ_SIZE))
     return f"{size:x}_{sha.hexdigest()[:16]}"
+
+
+def has_pdf_stream(path: Path) -> bool:
+    """Check whether an AI file contains an embedded PDF stream.
+
+    AI files saved with "PDF Compatible" mode in Illustrator embed a PDF
+    stream that Ghostscript can rasterize.  Files without it will fail.
+    """
+    with open(path, "rb") as f:
+        head = f.read(_PDF_SCAN_SIZE)
+    return b"%PDF-" in head
+
+
+def _require_pdf_stream(path: Path) -> None:
+    """Raise RuntimeError if an AI file lacks an embedded PDF stream."""
+    if not has_pdf_stream(path):
+        raise RuntimeError(
+            "AI file has no embedded PDF stream — "
+            "save with PDF compatibility enabled in Illustrator"
+        )
 
 
 def _probe_ai_points(path: Path) -> tuple[int, int]:
@@ -66,8 +90,18 @@ def _ai_preview_density(w72: int, h72: int) -> int:
     return min(density, AI_RASTER_MAX_DENSITY)
 
 
-def _rasterize_ai(path: Path) -> Image.Image:
-    """Rasterize an AI file to a PIL Image at preview resolution."""
+def _rasterize_ai(path: Path, fingerprint: str = "") -> Image.Image:
+    """Rasterize an AI file to a PIL Image at preview resolution.
+
+    If *fingerprint* is provided, the result is cached to disk as PNG
+    so subsequent opens are instant.
+    """
+    _require_pdf_stream(path)
+    # Return cached raster if available
+    cached = get_cached_raster(fingerprint)
+    if cached is not None:
+        return Image.open(cached)
+
     w72, h72 = _probe_ai_points(path)
     density = _ai_preview_density(w72, h72)
     result = subprocess.run(
@@ -77,21 +111,22 @@ def _rasterize_ai(path: Path) -> Image.Image:
     )
     if result.returncode != 0:
         raise RuntimeError(f"ImageMagick rasterize failed: {result.stderr.decode(errors='replace')}")
-    return Image.open(io.BytesIO(result.stdout))
+    img = Image.open(io.BytesIO(result.stdout))
+    store_raster(fingerprint, img)
+    return img
 
 
 def _get_ai_size(path: Path) -> tuple[int, int]:
-    """Get the rasterized dimensions of an AI file at preview density (fast, no full raster)."""
+    """Get the rasterized dimensions of an AI file at preview density.
+
+    Uses a single ImageMagick identify call at 72 DPI to probe base
+    dimensions, then computes final pixel dimensions mathematically —
+    no second subprocess needed.
+    """
+    _require_pdf_stream(path)
     w72, h72 = _probe_ai_points(path)
     density = _ai_preview_density(w72, h72)
-    result = subprocess.run(
-        magick_cmd("identify", "-density", str(density), "-format", "%w %h", f"{path}[0]"),
-        capture_output=True, text=True, timeout=30,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"ImageMagick identify failed: {result.stderr.strip()}")
-    parts = result.stdout.strip().split()
-    return int(parts[0]), int(parts[1])
+    return round(w72 * density / 72), round(h72 * density / 72)
 
 
 def rasterize_ai_cropped(
@@ -114,6 +149,7 @@ def rasterize_ai_cropped(
         Dimensions of the preview raster (used to relate crop coordinates to density).
     """
     x, y, w, h = crop
+    _require_pdf_stream(path)
     w72, h72 = _probe_ai_points(path)
     preview_density = _ai_preview_density(w72, h72)
 
@@ -155,24 +191,37 @@ def rasterize_ai_cropped(
     return cropped
 
 
-def open_image(path: Path) -> Image.Image:
-    """Open an image file, using psd-tools for PSD, ImageMagick for AI, Pillow for the rest."""
+def open_image(path: Path, fingerprint: str = "") -> Image.Image:
+    """Open an image file, using psd-tools for PSD, ImageMagick for AI, Pillow for the rest.
+
+    For AI files, *fingerprint* enables the raster cache so repeated
+    opens skip rasterization.
+    """
     ext = path.suffix.lower()
     if ext == ".psd":
         psd = PSDImage.open(str(path))
         return psd.composite()
     if ext == ".ai":
-        return _rasterize_ai(path)
+        return _rasterize_ai(path, fingerprint=fingerprint)
     return Image.open(path)
 
 
-def get_image_size(path: Path) -> tuple[int, int]:
-    """Get image dimensions without fully loading/compositing."""
+def get_image_size(path: Path, fingerprint: str = "") -> tuple[int, int]:
+    """Get image dimensions without fully loading/compositing.
+
+    For AI files, if *fingerprint* is provided and a cached raster
+    exists, dimensions are read from the cached PNG (instant).
+    """
     ext = path.suffix.lower()
     if ext == ".psd":
         psd = PSDImage.open(str(path))
         return psd.width, psd.height
     if ext == ".ai":
+        # Fast path: read dimensions from cached raster if available
+        cached = get_cached_raster(fingerprint)
+        if cached is not None:
+            with Image.open(cached) as img:
+                return img.size
         return _get_ai_size(path)
     with Image.open(path) as img:
         return img.size

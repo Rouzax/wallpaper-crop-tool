@@ -688,17 +688,17 @@ class MainWindow(QMainWindow):
             progress.setValue(i)
             progress.setLabelText(f"Reading: {f.name}  ({i + 1}/{len(files)})")
 
-            try:
-                w, h = get_image_size(f)
-            except Exception as exc:
-                skipped.append((f.name, str(exc)))
-                continue
-
-            # Compute content fingerprint for cache lookup
+            # Compute fingerprint first so AI files can use the raster cache
             try:
                 fp = compute_fingerprint(f)
             except OSError:
                 fp = ""
+
+            try:
+                w, h = get_image_size(f, fingerprint=fp)
+            except Exception as exc:
+                skipped.append((f.name, str(exc)))
+                continue
 
             rel = f.relative_to(self._input_folder)
             state = ImageState(path=f, rel_path=rel, img_w=w, img_h=h, fingerprint=fp)
@@ -806,7 +806,7 @@ class MainWindow(QMainWindow):
                 self._loader.quit()
                 self._loader.wait(500)
 
-        self._loader = ImageLoaderThread(state.path, self)
+        self._loader = ImageLoaderThread(state.path, self, fingerprint=state.fingerprint)
         self._loader.finished.connect(lambda pixmap, r=row: self._on_image_loaded(r, pixmap))
         self._loader.error.connect(lambda err: self._on_image_load_error(err))
         self._loader.start()

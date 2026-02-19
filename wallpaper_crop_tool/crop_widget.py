@@ -33,10 +33,10 @@ def pil_to_qpixmap(pil_img: Image.Image) -> QPixmap:
     return QPixmap.fromImage(qimg)
 
 
-def load_pixmap(path: Path) -> QPixmap:
+def load_pixmap(path: Path, fingerprint: str = "") -> QPixmap:
     """Load a QPixmap from any supported image file."""
     if path.suffix.lower() in (".psd", ".ai"):
-        pil_img = open_image(path)
+        pil_img = open_image(path, fingerprint=fingerprint)
         return pil_to_qpixmap(pil_img)
     return QPixmap(str(path))
 
@@ -50,13 +50,14 @@ class ImageLoaderThread(QThread):
     finished = pyqtSignal(QPixmap)
     error = pyqtSignal(str)
 
-    def __init__(self, path: Path, parent=None):
+    def __init__(self, path: Path, parent=None, fingerprint: str = ""):
         super().__init__(parent)
         self._path = path
+        self._fingerprint = fingerprint
 
     def run(self):
         try:
-            pixmap = load_pixmap(self._path)
+            pixmap = load_pixmap(self._path, fingerprint=self._fingerprint)
             self.finished.emit(pixmap)
         except Exception as e:
             self.error.emit(str(e))
