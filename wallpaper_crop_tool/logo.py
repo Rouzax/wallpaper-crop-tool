@@ -12,18 +12,7 @@ from pathlib import Path
 
 from PIL import Image
 
-# ---------------------------------------------------------------------------
-# ImageMagick availability detection
-# ---------------------------------------------------------------------------
-HAS_MAGICK = False
-try:
-    _magick_check = subprocess.run(
-        ["magick", "--version"], capture_output=True, timeout=5,
-    )
-    if _magick_check.returncode == 0:
-        HAS_MAGICK = True
-except Exception:
-    pass
+from wallpaper_crop_tool.config import HAS_MAGICK, magick_cmd
 
 
 def rasterize_logo(logo_path: Path, target_width: int) -> Image.Image:
@@ -38,7 +27,7 @@ def rasterize_logo(logo_path: Path, target_width: int) -> Image.Image:
             )
         # Probe SVG dimensions at 72 DPI to calculate exact render density
         probe = subprocess.run(
-            ["magick", "-density", "72", "-background", "none", str(logo_path), "-format", "%w", "info:"],
+            magick_cmd("-density", "72", "-background", "none", str(logo_path), "-format", "%w", "info:"),
             capture_output=True, text=True,
         )
         svg_w_72 = int(probe.stdout.strip()) if probe.returncode == 0 and probe.stdout.strip().isdigit() else 0
@@ -47,14 +36,14 @@ def rasterize_logo(logo_path: Path, target_width: int) -> Image.Image:
             # Exact density: render SVG directly at target width (no bitmap resize)
             exact_density = max(1, round(72.0 * target_width / svg_w_72))
             result = subprocess.run(
-                ["magick", "-density", str(exact_density), "-background", "none", str(logo_path), "PNG:-"],
+                magick_cmd("-density", str(exact_density), "-background", "none", str(logo_path), "PNG:-"),
                 capture_output=True,
             )
         else:
             # Fallback: render at high density then resize
             result = subprocess.run(
-                ["magick", "-density", "300", "-background", "none", str(logo_path),
-                 "-resize", f"{target_width}x", "PNG:-"],
+                magick_cmd("-density", "300", "-background", "none", str(logo_path),
+                           "-resize", f"{target_width}x", "PNG:-"),
                 capture_output=True,
             )
 

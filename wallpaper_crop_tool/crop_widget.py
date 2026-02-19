@@ -35,7 +35,7 @@ def pil_to_qpixmap(pil_img: Image.Image) -> QPixmap:
 
 def load_pixmap(path: Path) -> QPixmap:
     """Load a QPixmap from any supported image file."""
-    if path.suffix.lower() == ".psd":
+    if path.suffix.lower() in (".psd", ".ai"):
         pil_img = open_image(path)
         return pil_to_qpixmap(pil_img)
     return QPixmap(str(path))

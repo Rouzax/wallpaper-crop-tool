@@ -23,7 +23,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap, QImage, QAction, QKeySequence, QShortcut
 
 from wallpaper_crop_tool.config import (
-    PNG_COMPRESS_LEVEL, IMAGE_EXTENSIONS,
+    PNG_COMPRESS_LEVEL, IMAGE_EXTENSIONS, HAS_MAGICK, HAS_GHOSTSCRIPT, magick_cmd,
     LOGO_POSITIONS, LOGO_BASE_DIMENSIONS,
     OUTPUT_FORMATS, OUTPUT_FORMAT_DEFAULT,
     JPEG_QUALITY_DEFAULT, JPEG_QUALITY_MIN, JPEG_QUALITY_MAX,
@@ -34,7 +34,7 @@ from wallpaper_crop_tool.ratio_editor import RatioEditorDialog
 from wallpaper_crop_tool.models import ImageState, auto_center_max
 from wallpaper_crop_tool.image_io import open_image, get_image_size, unique_path, compute_fingerprint
 from wallpaper_crop_tool.crop_cache import load_crop_cache, save_crop_cache, lookup_crops, store_crops
-from wallpaper_crop_tool.logo import HAS_MAGICK, composite_logo
+from wallpaper_crop_tool.logo import composite_logo
 from wallpaper_crop_tool.worker import process_worker
 from wallpaper_crop_tool.crop_widget import ImageCropWidget, ImageLoaderThread
 
@@ -105,8 +105,13 @@ class MainWindow(QMainWindow):
         # Status bar
         self._status = QStatusBar()
         self.setStatusBar(self._status)
-        magick_status = "SVG logos: ✓ ImageMagick found" if HAS_MAGICK else "SVG logos: ✗ ImageMagick not found (PNG logos OK)"
-        self._status.showMessage(f"Select an input folder to begin.  |  {magick_status}")
+        if HAS_MAGICK and HAS_GHOSTSCRIPT:
+            toolchain = "ImageMagick: ✓  |  Ghostscript: ✓ (SVG logos + AI files)"
+        elif HAS_MAGICK:
+            toolchain = "ImageMagick: ✓  |  Ghostscript: ✗ (SVG logos OK, no AI files)"
+        else:
+            toolchain = "ImageMagick: ✗ (no SVG logos or AI files)"
+        self._status.showMessage(f"Select an input folder to begin.  |  {toolchain}")
 
         # --- Keyboard Shortcuts ---
         QShortcut(QKeySequence(Qt.Key.Key_PageDown), self, self._next_image)
@@ -561,7 +566,7 @@ class MainWindow(QMainWindow):
             if logo_path.suffix.lower() == ".svg":
                 # Rasterize SVG via ImageMagick for preview
                 result = subprocess.run(
-                    ["magick", "-density", "150", "-background", "none", str(logo_path), "PNG:-"],
+                    magick_cmd("-density", "150", "-background", "none", str(logo_path), "PNG:-"),
                     capture_output=True,
                 )
                 if result.returncode != 0:
@@ -664,6 +669,8 @@ class MainWindow(QMainWindow):
             )
 
         if not files:
+            # Warn if AI files exist but Ghostscript is missing
+            self._warn_ai_without_ghostscript()
             self._status.showMessage("No supported images found in the selected folder.")
             self._update_button_states()
             self._update_counter()
@@ -673,6 +680,8 @@ class MainWindow(QMainWindow):
         progress.setWindowModality(Qt.WindowModality.WindowModal)
         progress.setMinimumDuration(0)
 
+        skipped: list[tuple[str, str]] = []
+
         for i, f in enumerate(files):
             if progress.wasCanceled():
                 break
@@ -681,7 +690,8 @@ class MainWindow(QMainWindow):
 
             try:
                 w, h = get_image_size(f)
-            except Exception:
+            except Exception as exc:
+                skipped.append((f.name, str(exc)))
                 continue
 
             # Compute content fingerprint for cache lookup
@@ -710,9 +720,27 @@ class MainWindow(QMainWindow):
 
         progress.setValue(len(files))
 
-        if self._image_states:
+        # Warn about AI files needing Ghostscript
+        self._warn_ai_without_ghostscript()
+
+        # Report skipped files
+        if skipped:
+            cap = 20
+            lines = [f"• {name}: {err}" for name, err in skipped[:cap]]
+            if len(skipped) > cap:
+                lines.append(f"…and {len(skipped) - cap} more")
+            QMessageBox.warning(
+                self, "Some files could not be loaded",
+                f"{len(skipped)} file(s) were skipped due to errors:\n\n" + "\n".join(lines),
+            )
+
+        loaded = len(self._image_states)
+        if loaded:
             self._image_list.setCurrentRow(0)
-            self._status.showMessage(f"Loaded {len(self._image_states)} images from {self._input_folder}")
+            skip_note = f" ({len(skipped)} skipped)" if skipped else ""
+            self._status.showMessage(
+                f"Loaded {loaded} images from {self._input_folder}{skip_note}"
+            )
         else:
             self._status.showMessage("No supported images found in the selected folder.")
 
@@ -720,6 +748,25 @@ class MainWindow(QMainWindow):
 
         self._update_button_states()
         self._update_counter()
+
+    def _warn_ai_without_ghostscript(self):
+        """Show a one-time info dialog if AI files are present but Ghostscript is missing."""
+        if not (HAS_MAGICK and not HAS_GHOSTSCRIPT):
+            return
+        if not self._input_folder:
+            return
+        # Check for .ai files in the scanned folder
+        pattern = self._input_folder.rglob("*.ai") if self._scan_subfolders.isChecked() else self._input_folder.glob("*.ai")
+        has_ai = any(True for f in pattern if f.is_file())
+        if not has_ai:
+            return
+        QMessageBox.information(
+            self, "AI files require Ghostscript",
+            "This folder contains .ai files, but Ghostscript is not installed.\n\n"
+            "ImageMagick uses Ghostscript to rasterize AI (PostScript) files. "
+            "Install Ghostscript and restart the application to enable .ai support.\n\n"
+            "Download: https://ghostscript.com/releases/gsdnld.html",
+        )
 
     # =========================================================================
     # Image selection

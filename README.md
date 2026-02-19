@@ -8,7 +8,7 @@ A desktop application for batch cropping and resizing high-resolution wallpapers
 
 ## The Problem
 
-You have a collection of high-resolution wallpapers (PSD, PNG, JPEG, etc.) and need them in multiple screen ratios — 16:9, 16:10, ultrawide — each saved at a specific resolution. Doing this manually in Photoshop means opening each file, cropping three times, resizing, and exporting. For large collections, this takes forever.
+You have a collection of high-resolution wallpapers (PSD, PNG, JPEG, AI, etc.) and need them in multiple screen ratios — 16:9, 16:10, ultrawide — each saved at a specific resolution. Doing this manually in Photoshop means opening each file, cropping three times, resizing, and exporting. For large collections, this takes forever.
 
 ## The Solution
 
@@ -91,6 +91,8 @@ pip install -r requirements.txt
 ```
 
 For SVG logo support, ensure [ImageMagick](https://imagemagick.org/) is installed and `magick` is on your PATH.
+
+For AI (Adobe Illustrator) file support, both [ImageMagick](https://imagemagick.org/) and [Ghostscript](https://ghostscript.com/releases/gsdnld.html) are required (`magick` and `gs` on your PATH). ImageMagick uses Ghostscript to rasterize PostScript-based AI files.
 
 ### Run
 
@@ -235,7 +237,7 @@ These constants are in `wallpaper_crop_tool/config.py`:
 
 ## Supported Formats
 
-**Input:** PNG, JPEG, BMP, TIFF, WebP, PSD (Photoshop)
+**Input:** PNG, JPEG, BMP, TIFF, WebP, PSD (Photoshop), AI (Adobe Illustrator — requires ImageMagick + Ghostscript)
 
 **Output:** PNG (maximum compression) or JPEG (configurable quality, subsampling, Huffman optimization)
 
